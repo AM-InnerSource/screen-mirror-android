@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Base theme used before Compose takes over. Material Components "NoActionBar"
+        keeps the system from drawing its own action bar, since Compose draws the UI.
+    -->
+    <style name="Theme.ScreenMirror" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
