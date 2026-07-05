@@ -25,6 +25,9 @@ object CaptureState {
         /** Finished; a playable file was written to [outputPath]. */
         data class Finished(val outputPath: String) : Status
 
+        /** Auto-stopped because the free-tier session limit was reached. */
+        data class LimitReached(val message: String) : Status
+
         /** Something failed. */
         data class Error(val message: String) : Status
     }

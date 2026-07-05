@@ -24,6 +24,7 @@ import java.nio.ByteBuffer
 class NetworkReceiver(
     private val port: Int,
     private val onStatus: (Status) -> Unit,
+    private val onVideoSize: (Int, Int) -> Unit = { _, _ -> },
 ) {
     enum class Status { LISTENING, RECEIVING, STOPPED, ERROR }
 
@@ -134,6 +135,7 @@ class NetworkReceiver(
                         pendingFormat = format
                         maybeCreateDecoder()
                     }
+                    onVideoSize(width, height)
                 }
 
                 FrameProtocol.TAG_FRAME -> {
