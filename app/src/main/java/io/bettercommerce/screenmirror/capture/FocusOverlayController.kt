@@ -10,7 +10,6 @@ import android.graphics.Point
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
-import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -26,9 +25,10 @@ import kotlin.math.min
  * Because MediaProjection runs with the app in the background, there's no Compose
  * surface to tap — so this is a system overlay window (needs SYSTEM_ALERT_WINDOW).
  * The user **drags** the bubble over what they want to point at, then
- * **double-taps** it: the bubble's centre — normalised against the real display
- * size (which is exactly what MediaProjection captures) — is reported via [onPing]
- * and streamed to the Receiver, which draws a matching ripple.
+ * **triple-taps** it (more than a double tap, so a stray double tap won't fire):
+ * the bubble's centre — normalised against the real display size (which is exactly
+ * what MediaProjection captures) — is reported via [onPing] and streamed to the
+ * Receiver, which draws a matching ripple.
  *
  * All methods must be called on the main thread.
  */
@@ -69,24 +69,16 @@ class FocusOverlayController(
         }
 
         val slop = ViewConfiguration.get(context).scaledTouchSlop
-        val gesture = GestureDetector(
-            context,
-            object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDoubleTap(e: MotionEvent): Boolean {
-                    ping()
-                    view.pulse()
-                    return true
-                }
-            },
-        )
 
         var downRawX = 0f
         var downRawY = 0f
         var startX = 0
         var startY = 0
         var dragging = false
+        // Fire only past a double tap: count quick in-place taps and ping on the 3rd.
+        var tapCount = 0
+        var lastTapUpTime = 0L
         view.setOnTouchListener { _, event ->
-            gesture.onTouchEvent(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX
@@ -103,6 +95,23 @@ class FocusOverlayController(
                         lp.x = (startX + dx).toInt().coerceIn(0, displaySize.x - sizePx)
                         lp.y = (startY + dy).toInt().coerceIn(0, displaySize.y - sizePx)
                         runCatching { windowManager.updateViewLayout(view, lp) }
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (dragging) {
+                        tapCount = 0 // a drag breaks the tap streak
+                    } else {
+                        tapCount = if (event.eventTime - lastTapUpTime <= MULTI_TAP_WINDOW_MS) {
+                            tapCount + 1
+                        } else {
+                            1
+                        }
+                        lastTapUpTime = event.eventTime
+                        if (tapCount >= REQUIRED_TAPS) {
+                            tapCount = 0
+                            ping()
+                            view.pulse()
+                        }
                     }
                 }
             }
@@ -157,12 +166,18 @@ class FocusOverlayController(
     private companion object {
         const val TAG = "FocusOverlay"
         const val BUBBLE_DP = 64f
+
+        /** Max gap between taps to count them as one multi-tap streak. */
+        const val MULTI_TAP_WINDOW_MS = 450L
+
+        /** Taps needed to ping — 3 means "more than a double tap". */
+        const val REQUIRED_TAPS = 3
     }
 }
 
 /**
  * The bubble itself: a translucent target ring the user drags, plus a one-shot
- * outward "pulse" drawn locally when double-tapped so the presenter gets the same
+ * outward "pulse" drawn locally when triple-tapped so the presenter gets the same
  * confirmation the viewer sees.
  */
 private class FocusBubbleView(context: Context) : View(context) {

@@ -242,10 +242,10 @@ private fun PresenterPointerCard(granted: Boolean, onEnable: () -> Unit) {
             Text(
                 if (granted) {
                     "Ready. While streaming, drag the floating dot over anything and " +
-                        "double-tap it to highlight that spot on the viewer's screen."
+                        "triple-tap it to highlight that spot on the viewer's screen."
                 } else {
                     "Let ScreenMirror draw a small floating dot over other apps. " +
-                        "While streaming, drag it and double-tap to highlight a spot for the viewer."
+                        "While streaming, drag it and triple-tap to highlight a spot for the viewer."
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
