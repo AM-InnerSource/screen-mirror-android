@@ -23,6 +23,7 @@ class ScreenEncoder(
     private val width: Int,
     private val height: Int,
     private val densityDpi: Int,
+    private val config: CaptureConfig,
     private val listener: EncodedFrameListener,
 ) {
     private var codec: MediaCodec? = null
@@ -39,9 +40,22 @@ class ScreenEncoder(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
             )
-            setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
-            setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+            setInteger(MediaFormat.KEY_BIT_RATE, config.bitRate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, config.frameRate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, config.keyFrameIntervalSec)
+
+            // --- Low-latency / real-time tuning ---
+            // Constant bitrate keeps latency and bandwidth predictable for streaming.
+            setInteger(
+                MediaFormat.KEY_BITRATE_MODE,
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
+            )
+            // Realtime priority (0 = realtime, 1 = best-effort).
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
+            // Hint the encoder to target our framerate for pacing.
+            setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, config.frameRate.toFloat())
+            // Ask the encoder to keep at most ~1 frame of latency where supported.
+            setInteger(MediaFormat.KEY_LATENCY, 1)
         }
 
         codec = MediaCodec.createEncoderByType(MIME_TYPE).apply {
@@ -149,9 +163,6 @@ class ScreenEncoder(
     companion object {
         private const val TAG = "ScreenEncoder"
         private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC // H.264
-        private const val FRAME_RATE = 30
-        private const val I_FRAME_INTERVAL = 1 // seconds between keyframes
-        private const val BIT_RATE = 6_000_000 // 6 Mbps — fine for 720p
         private const val DEQUEUE_TIMEOUT_US = 10_000L
         private const val DRAIN_JOIN_TIMEOUT_MS = 2_000L
     }
