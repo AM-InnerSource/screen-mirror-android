@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bettercommerce.screenmirror.capture.CaptureState
 import io.bettercommerce.screenmirror.capture.LoopbackController
 import io.bettercommerce.screenmirror.capture.ScreenCaptureService
+import io.bettercommerce.screenmirror.monetization.InterstitialAdController
 
 /**
  * Single-device self-test (M2 loopback): captures this screen, encodes to H.264,
@@ -86,7 +88,12 @@ fun LoopbackScreen(onBack: () -> Unit) {
 
     fun onStopClicked() {
         activity.startService(ScreenCaptureService.stopIntent(activity))
+        // Natural break: show an interstitial to free users (no-op for Pro).
+        InterstitialAdController.showIfAvailable(activity)
     }
+
+    // Warm up an interstitial so it's ready when the session ends.
+    LaunchedEffect(Unit) { InterstitialAdController.preload(activity) }
 
     DisposableEffect(Unit) {
         onDispose { LoopbackController.detachSurface() }
