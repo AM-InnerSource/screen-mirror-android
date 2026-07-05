@@ -6,6 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.bettercommerce.screenmirror.ui.navigation.Routes
 import io.bettercommerce.screenmirror.ui.screens.HomeScreen
+import io.bettercommerce.screenmirror.ui.screens.LoopbackScreen
 import io.bettercommerce.screenmirror.ui.screens.ReceiverScreen
 import io.bettercommerce.screenmirror.ui.screens.SenderScreen
 import io.bettercommerce.screenmirror.ui.screens.SettingsScreen
@@ -22,6 +23,7 @@ fun ScreenMirrorApp() {
             HomeScreen(
                 onMirrorThisDevice = { navController.navigate(Routes.SENDER) },
                 onViewAnotherDevice = { navController.navigate(Routes.RECEIVER) },
+                onSelfTest = { navController.navigate(Routes.LOOPBACK) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
@@ -30,6 +32,9 @@ fun ScreenMirrorApp() {
         }
         composable(Routes.RECEIVER) {
             ReceiverScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.LOOPBACK) {
+            LoopbackScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { navController.popBackStack() })

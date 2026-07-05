@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +33,7 @@ import io.bettercommerce.screenmirror.ui.theme.ScreenMirrorTheme
 fun HomeScreen(
     onMirrorThisDevice: () -> Unit,
     onViewAnotherDevice: () -> Unit,
+    onSelfTest: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     Scaffold(
@@ -73,6 +75,16 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
 
             OutlinedButton(
+                onClick = onSelfTest,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp),
+            ) {
+                Icon(Icons.Filled.Loop, contentDescription = null)
+                Text("  Self-test (1 phone)")
+            }
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
                 onClick = onOpenSettings,
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(16.dp),
@@ -88,6 +100,6 @@ fun HomeScreen(
 @Composable
 private fun HomeScreenPreview() {
     ScreenMirrorTheme {
-        HomeScreen({}, {}, {})
+        HomeScreen({}, {}, {}, {})
     }
 }

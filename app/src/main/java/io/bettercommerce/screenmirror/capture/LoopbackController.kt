@@ -40,10 +40,17 @@ object LoopbackController : EncodedFrameListener {
         maybeCreateDecoder()
     }
 
+    private var frameCount = 0
+
     override fun onFrame(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = synchronized(lock) {
-        val d = decoder ?: return@synchronized
+        val d = decoder
+        if (d == null) {
+            Log.w(TAG, "frame dropped: no decoder (surface=${surface != null}, format=${pendingFormat != null})")
+            return@synchronized
+        }
         try {
             d.decode(buffer, info)
+            if (frameCount++ % 30 == 0) Log.i(TAG, "decoded frame #$frameCount")
         } catch (t: Throwable) {
             Log.w(TAG, "decode failed", t)
         }
@@ -59,6 +66,7 @@ object LoopbackController : EncodedFrameListener {
         val s = surface
         val f = pendingFormat
         if (decoder == null && s != null && f != null) {
+            Log.i(TAG, "creating decoder ${f.getInteger(MediaFormat.KEY_WIDTH)}x${f.getInteger(MediaFormat.KEY_HEIGHT)}")
             decoder = try {
                 VideoDecoder(s, f)
             } catch (t: Throwable) {

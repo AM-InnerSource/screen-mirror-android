@@ -8,5 +8,6 @@ object Routes {
     const val HOME = "home"
     const val SENDER = "sender"
     const val RECEIVER = "receiver"
+    const val LOOPBACK = "loopback"
     const val SETTINGS = "settings"
 }

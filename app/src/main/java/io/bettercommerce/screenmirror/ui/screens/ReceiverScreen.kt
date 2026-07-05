@@ -1,12 +1,9 @@
 package io.bettercommerce.screenmirror.ui.screens
 
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import io.bettercommerce.screenmirror.network.FrameProtocol
 import io.bettercommerce.screenmirror.network.NetworkReceiver
 
@@ -110,30 +106,12 @@ fun ReceiverScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
 
-            AndroidView(
+            VideoSurface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(9f / 16f),
-                factory = { ctx ->
-                    SurfaceView(ctx).apply {
-                        holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(holder: SurfaceHolder) {
-                                receiver.attachSurface(holder.surface)
-                            }
-
-                            override fun surfaceChanged(
-                                holder: SurfaceHolder,
-                                format: Int,
-                                width: Int,
-                                height: Int,
-                            ) = Unit
-
-                            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                receiver.detachSurface()
-                            }
-                        })
-                    }
-                },
+                    .weight(1f),
+                onSurfaceAvailable = { receiver.attachSurface(it) },
+                onSurfaceDestroyed = { receiver.detachSurface() },
             )
 
             Spacer(Modifier.height(16.dp))
