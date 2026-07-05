@@ -9,8 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.CastConnected
-import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,7 +56,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(16.dp),
             ) {
-                Icon(Icons.Filled.ScreenShare, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null)
                 Spacer(Modifier.height(0.dp))
                 Text("  Mirror this device  (Sender)")
             }
