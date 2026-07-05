@@ -1,6 +1,10 @@
 package io.bettercommerce.screenmirror.ui.screens
 
 import android.os.Build
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,13 +14,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,8 +44,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.bettercommerce.screenmirror.network.FrameProtocol
 import io.bettercommerce.screenmirror.network.NetworkReceiver
@@ -61,12 +68,16 @@ fun ReceiverScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var receiverStatus by remember { mutableStateOf(NetworkReceiver.Status.STOPPED) }
     var videoSize by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // Latest "focus here" ping from the sender; the id (uptime) makes repeat pings
+    // at the same spot re-trigger the ripple animation.
+    var focusPing by remember { mutableStateOf<FocusPing?>(null) }
     val ipAddress = remember { NetworkReceiver.localIpAddress() }
     val receiver = remember {
         NetworkReceiver(
             port = FrameProtocol.PORT,
             onStatus = { status -> receiverStatus = status },
             onVideoSize = { w, h -> videoSize = w to h },
+            onFocus = { x, y -> focusPing = FocusPing(x, y, SystemClock.uptimeMillis()) },
         )
     }
     val advertiser = remember { ReceiverAdvertiser(context) }
@@ -82,6 +93,7 @@ fun ReceiverScreen(onBack: () -> Unit) {
         receiver.stop()
         receiverStatus = NetworkReceiver.Status.STOPPED
         videoSize = null
+        focusPing = null
         controlsVisible = true
     }
 
@@ -111,16 +123,27 @@ fun ReceiverScreen(onBack: () -> Unit) {
         ) {
             val ar = videoSize?.let { (w, h) -> w.toFloat() / h } ?: (9f / 16f)
             val boxAr = maxWidth.value / maxHeight.value
-            val videoModifier = if (ar <= boxAr) {
-                Modifier.fillMaxHeight().aspectRatio(ar)
+            // Exact displayed size of the aspect-fit video, so the focus ripple can
+            // sit at the same fractional point the sender pinged.
+            val videoW: Dp
+            val videoH: Dp
+            if (ar <= boxAr) {
+                videoH = maxHeight
+                videoW = maxHeight * ar
             } else {
-                Modifier.fillMaxWidth().aspectRatio(ar)
+                videoW = maxWidth
+                videoH = maxWidth / ar
             }
-            VideoSurface(
-                modifier = videoModifier,
-                onSurfaceAvailable = { receiver.attachSurface(it) },
-                onSurfaceDestroyed = { receiver.detachSurface() },
-            )
+            Box(modifier = Modifier.size(videoW, videoH)) {
+                VideoSurface(
+                    modifier = Modifier.fillMaxSize(),
+                    onSurfaceAvailable = { receiver.attachSurface(it) },
+                    onSurfaceDestroyed = { receiver.detachSurface() },
+                )
+                focusPing?.let { ping ->
+                    FocusRipple(ping = ping, areaWidth = videoW, areaHeight = videoH)
+                }
+            }
         }
 
         // --- Top overlay: back + address/status ---
@@ -213,6 +236,44 @@ fun ReceiverScreen(onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** A "focus here" ping: normalized position plus a unique id to re-trigger animation. */
+private data class FocusPing(val x: Float, val y: Float, val id: Long)
+
+/**
+ * A one-shot ripple drawn at the sender's pinged point. [x]/[y] on the ping are
+ * fractions of the video, mapped onto [areaWidth] x [areaHeight] (the displayed
+ * video rect). The ring expands and fades out; a repeat ping (new id) restarts it.
+ */
+@Composable
+private fun FocusRipple(ping: FocusPing, areaWidth: Dp, areaHeight: Dp) {
+    val progress = remember(ping.id) { Animatable(0f) }
+    LaunchedEffect(ping.id) {
+        progress.snapTo(0f)
+        progress.animateTo(1f, animationSpec = tween(durationMillis = 700))
+    }
+
+    val reach = 44.dp
+    val boxSize = reach * 2
+    val offsetX = areaWidth * ping.x - reach
+    val offsetY = areaHeight * ping.y - reach
+    val alpha = (1f - progress.value).coerceIn(0f, 1f)
+    val accent = Color(0xFF4F7CFF)
+
+    Box(modifier = Modifier.offset(offsetX, offsetY).size(boxSize)) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val maxR = size.minDimension / 2f
+            val ringR = maxR * (0.35f + 0.65f * progress.value)
+            drawCircle(color = accent.copy(alpha = alpha * 0.20f), radius = ringR)
+            drawCircle(
+                color = accent.copy(alpha = alpha),
+                radius = ringR,
+                style = Stroke(width = 6f),
+            )
+            drawCircle(color = Color.White.copy(alpha = alpha), radius = maxR * 0.10f)
         }
     }
 }

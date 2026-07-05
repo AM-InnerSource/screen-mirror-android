@@ -69,6 +69,23 @@ class NetworkSender(
         }
     }
 
+    /**
+     * Sends a "focus here" ping to the Receiver. [xNorm]/[yNorm] are fractions
+     * (0f..1f) of the captured frame. Safe to call from any thread; no-ops if the
+     * socket isn't connected. Shares the stream lock with frame writes so a ping
+     * never interleaves mid-frame.
+     */
+    fun sendFocus(xNorm: Float, yNorm: Float) {
+        val stream = out ?: return
+        try {
+            synchronized(stream) {
+                FrameProtocol.writeFocus(stream, xNorm.coerceIn(0f, 1f), yNorm.coerceIn(0f, 1f))
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "sending focus failed", t)
+        }
+    }
+
     override fun onEnded() = close()
 
     fun close() {
