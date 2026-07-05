@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bettercommerce.screenmirror.capture.CaptureState
 import io.bettercommerce.screenmirror.capture.ScreenCaptureService
 import io.bettercommerce.screenmirror.network.FrameProtocol
+import io.bettercommerce.screenmirror.network.SenderDiscovery
 
 /**
  * M3 Sender screen: connect to a Receiver by IP and stream this device's screen
@@ -57,6 +59,14 @@ fun SenderScreen(onBack: () -> Unit) {
     val status by CaptureState.status.collectAsStateWithLifecycle()
 
     var host by remember { mutableStateOf("") }
+
+    // Auto-discover receivers advertising on the local network (M4 pairing).
+    val discovery = remember { SenderDiscovery(activity) }
+    val discovered by discovery.receivers.collectAsStateWithLifecycle()
+    DisposableEffect(Unit) {
+        discovery.start()
+        onDispose { discovery.stop() }
+    }
 
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -123,6 +133,34 @@ fun SenderScreen(onBack: () -> Unit) {
             StatusCard(status)
             Spacer(Modifier.height(24.dp))
 
+            // Discovered receivers (auto-pairing) — tap to fill in the address.
+            if (!isStreaming) {
+                Text(
+                    text = if (discovered.isEmpty()) "Searching for receivers on WiFi…"
+                    else "Nearby receivers — tap to select:",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                discovered.forEach { receiver ->
+                    Card(
+                        onClick = { host = receiver.host },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(receiver.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${receiver.host}:${receiver.port}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
             OutlinedTextField(
                 value = host,
                 onValueChange = { host = it },
@@ -135,7 +173,7 @@ fun SenderScreen(onBack: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Open \"View another device\" on the other phone to see its IP.",
+                "Or open \"View another device\" on the other phone and pick it above.",
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )

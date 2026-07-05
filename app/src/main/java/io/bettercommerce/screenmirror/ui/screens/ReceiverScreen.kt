@@ -1,5 +1,6 @@
 package io.bettercommerce.screenmirror.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,10 +30,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.bettercommerce.screenmirror.network.FrameProtocol
 import io.bettercommerce.screenmirror.network.NetworkReceiver
+import io.bettercommerce.screenmirror.network.ReceiverAdvertiser
 
 /**
  * M3 Receiver screen: acts as a TCP server. Shows this device's IP so the Sender
@@ -41,14 +44,29 @@ import io.bettercommerce.screenmirror.network.NetworkReceiver
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiverScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     var receiverStatus by remember { mutableStateOf(NetworkReceiver.Status.STOPPED) }
     val ipAddress = remember { NetworkReceiver.localIpAddress() }
     val receiver = remember {
         NetworkReceiver(FrameProtocol.PORT) { status -> receiverStatus = status }
     }
+    val advertiser = remember { ReceiverAdvertiser(context) }
+
+    fun startListening() {
+        receiver.start()
+        // Advertise on the LAN so senders can auto-discover this device.
+        advertiser.register(FrameProtocol.PORT, Build.MODEL ?: "ScreenMirror")
+    }
+
+    fun stopListening() {
+        advertiser.unregister()
+        receiver.stop()
+        receiverStatus = NetworkReceiver.Status.STOPPED
+    }
 
     DisposableEffect(Unit) {
         onDispose {
+            advertiser.unregister()
             receiver.detachSurface()
             receiver.stop()
         }
@@ -118,10 +136,7 @@ fun ReceiverScreen(onBack: () -> Unit) {
 
             if (isListening) {
                 Button(
-                    onClick = {
-                        receiver.stop()
-                        receiverStatus = NetworkReceiver.Status.STOPPED
-                    },
+                    onClick = { stopListening() },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
@@ -130,7 +145,7 @@ fun ReceiverScreen(onBack: () -> Unit) {
                 }
             } else {
                 Button(
-                    onClick = { receiver.start() },
+                    onClick = { startListening() },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
