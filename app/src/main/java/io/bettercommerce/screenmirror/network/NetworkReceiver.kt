@@ -25,6 +25,7 @@ class NetworkReceiver(
     private val port: Int,
     private val onStatus: (Status) -> Unit,
     private val onVideoSize: (Int, Int) -> Unit = { _, _ -> },
+    private val onFocus: (Float, Float) -> Unit = { _, _ -> },
 ) {
     enum class Status { LISTENING, RECEIVING, STOPPED, ERROR }
 
@@ -146,6 +147,12 @@ class NetworkReceiver(
                     synchronized(lock) {
                         decoder?.decode(data, size, ptsUs, flags)
                     }
+                }
+
+                FrameProtocol.TAG_FOCUS -> {
+                    val xNorm = input.readFloat()
+                    val yNorm = input.readFloat()
+                    onFocus(xNorm, yNorm)
                 }
 
                 else -> {

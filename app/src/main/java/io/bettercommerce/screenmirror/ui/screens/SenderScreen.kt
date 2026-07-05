@@ -3,8 +3,11 @@ package io.bettercommerce.screenmirror.ui.screens
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +62,23 @@ fun SenderScreen(onBack: () -> Unit) {
     val status by CaptureState.status.collectAsStateWithLifecycle()
 
     var host by remember { mutableStateOf("") }
+
+    // Presenter pointer: needs the "draw over other apps" permission so the focus
+    // bubble can float above whatever the sender is showing while streaming.
+    fun overlayAllowed() =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(activity)
+    var overlayGranted by remember { mutableStateOf(overlayAllowed()) }
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { overlayGranted = overlayAllowed() }
+    fun requestOverlayPermission() {
+        overlayPermissionLauncher.launch(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${activity.packageName}"),
+            )
+        )
+    }
 
     // Auto-discover receivers advertising on the local network (M4 pairing).
     val discovery = remember { SenderDiscovery(activity) }
@@ -131,6 +151,12 @@ fun SenderScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.Center,
         ) {
             StatusCard(status)
+            Spacer(Modifier.height(16.dp))
+
+            PresenterPointerCard(
+                granted = overlayGranted,
+                onEnable = { requestOverlayPermission() },
+            )
             Spacer(Modifier.height(24.dp))
 
             // Discovered receivers (auto-pairing) — tap to fill in the address.
@@ -198,6 +224,34 @@ fun SenderScreen(onBack: () -> Unit) {
                     Icon(Icons.Filled.Cast, contentDescription = null)
                     Text("  Start streaming")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Explains the presenter-pointer feature and, until granted, offers a button to
+ * turn on the "draw over other apps" permission it needs.
+ */
+@Composable
+private fun PresenterPointerCard(granted: Boolean, onEnable: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Presenter pointer", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (granted) {
+                    "Ready. While streaming, drag the floating dot over anything and " +
+                        "triple-tap it to highlight that spot on the viewer's screen."
+                } else {
+                    "Let ScreenMirror draw a small floating dot over other apps. " +
+                        "While streaming, drag it and triple-tap to highlight a spot for the viewer."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!granted) {
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onEnable) { Text("Enable presenter pointer") }
             }
         }
     }

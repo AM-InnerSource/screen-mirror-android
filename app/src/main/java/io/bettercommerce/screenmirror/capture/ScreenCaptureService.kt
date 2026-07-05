@@ -44,6 +44,11 @@ class ScreenCaptureService : Service() {
     // Assigned from a background thread in the SENDER path, read from the main thread.
     @Volatile private var encoder: ScreenEncoder? = null
 
+    // Live only in SENDER mode: used by the presenter-pointer overlay to ping the receiver.
+    @Volatile private var networkSender: NetworkSender? = null
+    // Touched only on the main thread.
+    private var focusOverlay: FocusOverlayController? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessionLimitRunnable = Runnable { onFreeLimitReached() }
     private var limitReached = false
@@ -111,9 +116,11 @@ class ScreenCaptureService : Service() {
             Thread {
                 try {
                     val sender = NetworkSender(host, port).also { it.connect() }
+                    networkSender = sender
                     encoder = ScreenEncoder(projection, width, height, dpi, config, sender).also { it.start() }
                     CaptureState.update(CaptureState.Status.Recording("Streaming to $host:$port"))
                     maybeStartSessionTimer()
+                    mainHandler.post { showFocusOverlay() }
                     Log.i(TAG, "Streaming -> $host:$port (${width}x$height @ ${config.frameRate}fps)")
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start network sender", t)
@@ -154,6 +161,9 @@ class ScreenCaptureService : Service() {
 
         val finishedPath = (CaptureState.status.value as? CaptureState.Status.Recording)?.outputPath
 
+        hideFocusOverlay()
+        networkSender = null
+
         encoder?.stop()
         encoder = null
 
@@ -175,6 +185,29 @@ class ScreenCaptureService : Service() {
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    // --- Presenter-pointer overlay (SENDER mode only) ----------------------------
+
+    /** Shows the draggable focus bubble. Must run on the main thread. */
+    private fun showFocusOverlay() {
+        if (focusOverlay != null) return
+        val controller = FocusOverlayController(this) { xNorm, yNorm ->
+            networkSender?.sendFocus(xNorm, yNorm)
+        }
+        controller.show()
+        focusOverlay = controller
+    }
+
+    /** Removes the focus bubble on the main thread from wherever this is called. */
+    private fun hideFocusOverlay() {
+        val overlay = focusOverlay ?: return
+        focusOverlay = null
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            overlay.hide()
+        } else {
+            mainHandler.post { overlay.hide() }
+        }
     }
 
     /** Free tier: auto-stop the session after the time limit. Pro is unlimited. */
@@ -283,6 +316,7 @@ class ScreenCaptureService : Service() {
     override fun onDestroy() {
         // Defensive: make sure nothing is left running.
         mainHandler.removeCallbacks(sessionLimitRunnable)
+        hideFocusOverlay()
         encoder?.stop()
         mediaProjection?.stop()
         super.onDestroy()
