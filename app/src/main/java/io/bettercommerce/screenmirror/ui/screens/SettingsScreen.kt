@@ -89,7 +89,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         text = if (isPro) {
                             "No ads · 1080p/60fps · unlimited sessions · multiple devices"
                         } else {
-                            "Ads shown · 720p · session limits. Upgrade to unlock everything."
+                            "Ads · 720p · 50-min sessions. Upgrade to unlock everything."
                         },
                         style = MaterialTheme.typography.bodySmall,
                     )

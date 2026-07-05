@@ -12,7 +12,9 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -41,6 +43,10 @@ class ScreenCaptureService : Service() {
     private var mediaProjection: MediaProjection? = null
     // Assigned from a background thread in the SENDER path, read from the main thread.
     @Volatile private var encoder: ScreenEncoder? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val sessionLimitRunnable = Runnable { onFreeLimitReached() }
+    private var limitReached = false
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -107,6 +113,7 @@ class ScreenCaptureService : Service() {
                     val sender = NetworkSender(host, port).also { it.connect() }
                     encoder = ScreenEncoder(projection, width, height, dpi, config, sender).also { it.start() }
                     CaptureState.update(CaptureState.Status.Recording("Streaming to $host:$port"))
+                    maybeStartSessionTimer()
                     Log.i(TAG, "Streaming -> $host:$port (${width}x$height @ ${config.frameRate}fps)")
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start network sender", t)
@@ -131,6 +138,7 @@ class ScreenCaptureService : Service() {
         try {
             encoder = ScreenEncoder(projection, width, height, dpi, config, listener).also { it.start() }
             CaptureState.update(CaptureState.Status.Recording(recordingLabel))
+            maybeStartSessionTimer()
             Log.i(TAG, "Capture started -> $recordingLabel (${width}x$height @ ${config.frameRate}fps)")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start encoder", t)
@@ -140,6 +148,10 @@ class ScreenCaptureService : Service() {
     }
 
     private fun stopCapture() {
+        mainHandler.removeCallbacks(sessionLimitRunnable)
+        val hitLimit = limitReached
+        limitReached = false
+
         val finishedPath = (CaptureState.status.value as? CaptureState.Status.Recording)?.outputPath
 
         encoder?.stop()
@@ -149,14 +161,33 @@ class ScreenCaptureService : Service() {
         mediaProjection?.stop()
         mediaProjection = null
 
-        if (finishedPath != null) {
-            CaptureState.update(CaptureState.Status.Finished(finishedPath))
-        } else if (CaptureState.status.value !is CaptureState.Status.Error) {
-            CaptureState.update(CaptureState.Status.Idle)
+        when {
+            hitLimit -> CaptureState.update(
+                CaptureState.Status.LimitReached(
+                    "Free sessions are limited to ${FREE_SESSION_LIMIT_MIN} minutes. " +
+                        "Upgrade to Pro for unlimited mirroring.",
+                ),
+            )
+            finishedPath != null -> CaptureState.update(CaptureState.Status.Finished(finishedPath))
+            CaptureState.status.value !is CaptureState.Status.Error ->
+                CaptureState.update(CaptureState.Status.Idle)
         }
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /** Free tier: auto-stop the session after the time limit. Pro is unlimited. */
+    private fun maybeStartSessionTimer() {
+        if (Entitlements.isProNow) return
+        mainHandler.postDelayed(sessionLimitRunnable, FREE_SESSION_LIMIT_MS)
+        Log.i(TAG, "Free session timer armed: ${FREE_SESSION_LIMIT_MIN} min")
+    }
+
+    private fun onFreeLimitReached() {
+        Log.i(TAG, "Free session limit reached — stopping")
+        limitReached = true
+        stopCapture()
     }
 
     // --- Foreground notification -------------------------------------------------
@@ -251,6 +282,7 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         // Defensive: make sure nothing is left running.
+        mainHandler.removeCallbacks(sessionLimitRunnable)
         encoder?.stop()
         mediaProjection?.stop()
         super.onDestroy()
@@ -260,6 +292,10 @@ class ScreenCaptureService : Service() {
         private const val TAG = "ScreenCaptureService"
         private const val CHANNEL_ID = "screen_capture"
         private const val NOTIFICATION_ID = 1001
+
+        /** Free-tier session cap. Pro is unlimited. */
+        const val FREE_SESSION_LIMIT_MIN = 50L
+        private const val FREE_SESSION_LIMIT_MS = FREE_SESSION_LIMIT_MIN * 60 * 1000
 
         const val ACTION_START = "io.bettercommerce.screenmirror.action.START"
         const val ACTION_STOP = "io.bettercommerce.screenmirror.action.STOP"

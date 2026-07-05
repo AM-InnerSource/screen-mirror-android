@@ -145,6 +145,7 @@ fun LoopbackScreen(onBack: () -> Unit) {
                     is CaptureState.Status.Starting -> "Starting…"
                     is CaptureState.Status.Recording -> "Pipeline running ✓"
                     is CaptureState.Status.Finished -> "Stopped."
+                    is CaptureState.Status.LimitReached -> (status as CaptureState.Status.LimitReached).message
                     is CaptureState.Status.Error -> "Error: ${(status as CaptureState.Status.Error).message}"
                 },
                 style = MaterialTheme.typography.bodySmall,

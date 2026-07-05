@@ -221,6 +221,8 @@ private fun StatusCard(status: CaptureState.Status) {
                     "Streaming" to status.outputPath
                 is CaptureState.Status.Finished ->
                     "Stopped" to "Streaming ended."
+                is CaptureState.Status.LimitReached ->
+                    "Time limit reached" to status.message
                 is CaptureState.Status.Error ->
                     "Error" to status.message
             }
