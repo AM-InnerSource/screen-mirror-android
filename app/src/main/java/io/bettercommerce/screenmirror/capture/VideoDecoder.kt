@@ -51,6 +51,29 @@ class VideoDecoder(surface: Surface, format: MediaFormat) {
         }
     }
 
+    /**
+     * Same as [decode] but from a raw byte array (used by the network receiver,
+     * where frames arrive off a socket rather than an encoder buffer).
+     */
+    fun decode(data: ByteArray, size: Int, presentationTimeUs: Long, flags: Int) {
+        val inIndex = codec.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
+        if (inIndex >= 0) {
+            val input = codec.getInputBuffer(inIndex)
+            if (input != null) {
+                input.clear()
+                input.put(data, 0, size)
+                codec.queueInputBuffer(inIndex, 0, size, presentationTimeUs, flags)
+            } else {
+                codec.queueInputBuffer(inIndex, 0, 0, presentationTimeUs, 0)
+            }
+        }
+        var outIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+        while (outIndex >= 0) {
+            codec.releaseOutputBuffer(outIndex, /* render = */ true)
+            outIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+        }
+    }
+
     fun release() {
         try {
             codec.stop()

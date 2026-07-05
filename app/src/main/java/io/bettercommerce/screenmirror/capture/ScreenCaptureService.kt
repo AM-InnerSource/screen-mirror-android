@@ -19,6 +19,8 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import io.bettercommerce.screenmirror.MainActivity
 import io.bettercommerce.screenmirror.R
+import io.bettercommerce.screenmirror.network.FrameProtocol
+import io.bettercommerce.screenmirror.network.NetworkSender
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -36,7 +38,8 @@ import kotlin.math.roundToInt
 class ScreenCaptureService : Service() {
 
     private var mediaProjection: MediaProjection? = null
-    private var encoder: ScreenEncoder? = null
+    // Assigned from a background thread in the SENDER path, read from the main thread.
+    @Volatile private var encoder: ScreenEncoder? = null
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -71,7 +74,9 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        val loopback = intent.getBooleanExtra(EXTRA_LOOPBACK, false)
+        val mode = intent.getIntExtra(EXTRA_MODE, MODE_FILE)
+        val host = intent.getStringExtra(EXTRA_HOST)
+        val port = intent.getIntExtra(EXTRA_PORT, FrameProtocol.PORT)
 
         CaptureState.update(CaptureState.Status.Starting)
 
@@ -89,13 +94,29 @@ class ScreenCaptureService : Service() {
         mediaProjection = projection
         projection.registerCallback(projectionCallback, null)
 
-        // 3. Pick the destination for the encoded frames:
-        //    - loopback (M2): decode + render locally via LoopbackController
-        //    - file     (M1): write an .mp4 via MuxerFrameListener
         val (width, height, dpi) = captureDimensions()
+
+        // 3. The SENDER path connects a socket (blocking) before encoding, so it
+        //    runs on a background thread. FILE / LOOPBACK start synchronously.
+        if (mode == MODE_SENDER && host != null) {
+            Thread {
+                try {
+                    val sender = NetworkSender(host, port).also { it.connect() }
+                    encoder = ScreenEncoder(projection, width, height, dpi, sender).also { it.start() }
+                    CaptureState.update(CaptureState.Status.Recording("Streaming to $host:$port"))
+                    Log.i(TAG, "Streaming -> $host:$port (${width}x$height)")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to start network sender", t)
+                    CaptureState.update(CaptureState.Status.Error(t.message ?: "connect failed"))
+                    stopCapture()
+                }
+            }.start()
+            return
+        }
+
         val listener: EncodedFrameListener
         val recordingLabel: String
-        if (loopback) {
+        if (mode == MODE_LOOPBACK) {
             listener = LoopbackController
             recordingLabel = LOOPBACK_LABEL
         } else {
@@ -242,30 +263,48 @@ class ScreenCaptureService : Service() {
         const val ACTION_STOP = "io.bettercommerce.screenmirror.action.STOP"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
-        const val EXTRA_LOOPBACK = "extra_loopback"
+        const val EXTRA_MODE = "extra_mode"
+        const val EXTRA_HOST = "extra_host"
+        const val EXTRA_PORT = "extra_port"
+
+        const val MODE_FILE = 0
+        const val MODE_LOOPBACK = 1
+        const val MODE_SENDER = 2
 
         /** Sentinel label used in [CaptureState] when running the M2 loopback. */
         const val LOOPBACK_LABEL = "loopback"
 
         /** Starts capture that writes an .mp4 file (M1). */
         fun startIntent(context: Context, resultCode: Int, data: Intent): Intent =
-            buildStartIntent(context, resultCode, data, loopback = false)
+            buildStartIntent(context, resultCode, data, MODE_FILE)
 
         /** Starts capture that decodes + renders locally (M2 loopback). */
         fun startLoopbackIntent(context: Context, resultCode: Int, data: Intent): Intent =
-            buildStartIntent(context, resultCode, data, loopback = true)
+            buildStartIntent(context, resultCode, data, MODE_LOOPBACK)
+
+        /** Starts capture that streams to [host]:[port] (M3). */
+        fun startSenderIntent(
+            context: Context,
+            resultCode: Int,
+            data: Intent,
+            host: String,
+            port: Int,
+        ): Intent = buildStartIntent(context, resultCode, data, MODE_SENDER).apply {
+            putExtra(EXTRA_HOST, host)
+            putExtra(EXTRA_PORT, port)
+        }
 
         private fun buildStartIntent(
             context: Context,
             resultCode: Int,
             data: Intent,
-            loopback: Boolean,
+            mode: Int,
         ): Intent =
             Intent(context, ScreenCaptureService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_RESULT_DATA, data)
-                putExtra(EXTRA_LOOPBACK, loopback)
+                putExtra(EXTRA_MODE, mode)
             }
 
         fun stopIntent(context: Context): Intent =

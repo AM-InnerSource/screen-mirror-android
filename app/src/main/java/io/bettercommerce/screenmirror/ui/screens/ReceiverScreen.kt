@@ -1,14 +1,7 @@
 package io.bettercommerce.screenmirror.ui.screens
 
-import android.Manifest
-import android.app.Activity
-import android.content.Context
-import android.media.projection.MediaProjectionManager
-import android.os.Build
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,9 +13,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,80 +27,44 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.bettercommerce.screenmirror.capture.CaptureState
-import io.bettercommerce.screenmirror.capture.LoopbackController
-import io.bettercommerce.screenmirror.capture.ScreenCaptureService
+import io.bettercommerce.screenmirror.network.FrameProtocol
+import io.bettercommerce.screenmirror.network.NetworkReceiver
 
 /**
- * M2 Receiver screen: local loopback. Captures this screen, encodes to H.264,
- * decodes it, and renders the decoded frames into the preview below — proving the
- * full capture -> encode -> decode -> render pipeline works on a single device.
- *
- * (Expect a "hall of mirrors" effect while previewing, since we are decoding the
- * very screen we are displaying. That is the loopback working.)
+ * M3 Receiver screen: acts as a TCP server. Shows this device's IP so the Sender
+ * knows where to connect, then decodes the incoming H.264 stream onto the preview.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiverScreen(onBack: () -> Unit) {
-    val activity = rememberActivity()
-    val status by CaptureState.status.collectAsStateWithLifecycle()
-
-    val projectionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val data = result.data
-        if (result.resultCode == Activity.RESULT_OK && data != null) {
-            ContextCompat.startForegroundService(
-                activity,
-                ScreenCaptureService.startLoopbackIntent(activity, result.resultCode, data),
-            )
-        } else {
-            CaptureState.update(CaptureState.Status.Idle)
-        }
+    var receiverStatus by remember { mutableStateOf(NetworkReceiver.Status.STOPPED) }
+    val ipAddress = remember { NetworkReceiver.localIpAddress() }
+    val receiver = remember {
+        NetworkReceiver(FrameProtocol.PORT) { status -> receiverStatus = status }
     }
 
-    fun launchProjection() {
-        val manager =
-            activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projectionLauncher.launch(manager.createScreenCaptureIntent())
-    }
-
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { launchProjection() }
-
-    fun onStartClicked() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            launchProjection()
-        }
-    }
-
-    fun onStopClicked() {
-        activity.startService(ScreenCaptureService.stopIntent(activity))
-    }
-
-    // Always release the render surface when leaving the screen.
     DisposableEffect(Unit) {
-        onDispose { LoopbackController.detachSurface() }
+        onDispose {
+            receiver.detachSurface()
+            receiver.stop()
+        }
     }
 
-    val isRunning = status is CaptureState.Status.Recording ||
-        status is CaptureState.Status.Starting
+    val isListening = receiverStatus == NetworkReceiver.Status.LISTENING ||
+        receiverStatus == NetworkReceiver.Status.RECEIVING
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Local loopback (M2)") },
+                title = { Text("View another device") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -121,15 +79,37 @@ fun ReceiverScreen(onBack: () -> Unit) {
                 .padding(innerPadding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top,
         ) {
-            Text(
-                text = "Decoded preview of this device's screen:",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("This device's address", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (ipAddress != null) "$ipAddress : ${FrameProtocol.PORT}"
+                        else "Not on WiFi?",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = when (receiverStatus) {
+                            NetworkReceiver.Status.LISTENING -> "Waiting for a sender to connect…"
+                            NetworkReceiver.Status.RECEIVING -> "Receiving ✓"
+                            NetworkReceiver.Status.STOPPED -> "Tap Start listening, then enter this IP on the sender."
+                            NetworkReceiver.Status.ERROR -> "Error — is another instance already listening?"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
-            // The decoded frames render here.
             AndroidView(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -138,7 +118,7 @@ fun ReceiverScreen(onBack: () -> Unit) {
                     SurfaceView(ctx).apply {
                         holder.addCallback(object : SurfaceHolder.Callback {
                             override fun surfaceCreated(holder: SurfaceHolder) {
-                                LoopbackController.attachSurface(holder.surface)
+                                receiver.attachSurface(holder.surface)
                             }
 
                             override fun surfaceChanged(
@@ -149,7 +129,7 @@ fun ReceiverScreen(onBack: () -> Unit) {
                             ) = Unit
 
                             override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                LoopbackController.detachSurface()
+                                receiver.detachSurface()
                             }
                         })
                     }
@@ -158,49 +138,28 @@ fun ReceiverScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            Text(
-                text = when (status) {
-                    is CaptureState.Status.Idle -> "Tap Start loopback to begin."
-                    is CaptureState.Status.Starting -> "Starting…"
-                    is CaptureState.Status.Recording -> "Mirroring locally ✓"
-                    is CaptureState.Status.Finished -> "Stopped."
-                    is CaptureState.Status.Error -> "Error: ${(status as CaptureState.Status.Error).message}"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(16.dp))
-
-            if (isRunning) {
+            if (isListening) {
                 Button(
-                    onClick = { onStopClicked() },
+                    onClick = {
+                        receiver.stop()
+                        receiverStatus = NetworkReceiver.Status.STOPPED
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
                     Icon(Icons.Filled.Stop, contentDescription = null)
-                    Text("  Stop loopback")
+                    Text("  Stop listening")
                 }
             } else {
                 Button(
-                    onClick = { onStartClicked() },
+                    onClick = { receiver.start() },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                    Text("  Start loopback")
+                    Icon(Icons.Filled.Wifi, contentDescription = null)
+                    Text("  Start listening")
                 }
             }
         }
     }
-}
-
-/** Resolves the hosting [Activity] from the composition context. */
-@Composable
-private fun rememberActivity(): Activity {
-    var ctx: Context = LocalContext.current
-    while (ctx is android.content.ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    error("ReceiverScreen must be hosted in an Activity")
 }

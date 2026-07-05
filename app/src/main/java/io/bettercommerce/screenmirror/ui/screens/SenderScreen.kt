@@ -3,7 +3,6 @@ package io.bettercommerce.screenmirror.ui.screens
 import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,9 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -26,39 +26,48 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.bettercommerce.screenmirror.capture.CaptureState
 import io.bettercommerce.screenmirror.capture.ScreenCaptureService
+import io.bettercommerce.screenmirror.network.FrameProtocol
 
 /**
- * M1 Sender screen: request the screen-capture grant, start/stop the capture
- * service, and show where the proof-of-capture MP4 was written.
+ * M3 Sender screen: connect to a Receiver by IP and stream this device's screen
+ * to it over WiFi.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SenderScreen(onBack: () -> Unit) {
-    val context = LocalContextActivity()
+    val activity = rememberSenderActivity()
     val status by CaptureState.status.collectAsStateWithLifecycle()
 
-    // Launcher for the mandatory system "Start recording?" dialog.
+    var host by remember { mutableStateOf("") }
+
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) {
             ContextCompat.startForegroundService(
-                context,
-                ScreenCaptureService.startIntent(context, result.resultCode, data),
+                activity,
+                ScreenCaptureService.startSenderIntent(
+                    activity, result.resultCode, data, host.trim(), FrameProtocol.PORT,
+                ),
             )
         } else {
             CaptureState.update(CaptureState.Status.Idle)
@@ -67,20 +76,16 @@ fun SenderScreen(onBack: () -> Unit) {
 
     fun launchProjection() {
         val manager =
-            context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(manager.createScreenCaptureIntent())
     }
 
-    // On Android 13+ the foreground-service notification needs runtime permission.
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { _ ->
-        // Proceed regardless — capture still works; only the notification visibility
-        // depends on the grant.
-        launchProjection()
-    }
+    ) { launchProjection() }
 
     fun onStartClicked() {
+        if (host.isBlank()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
@@ -89,10 +94,10 @@ fun SenderScreen(onBack: () -> Unit) {
     }
 
     fun onStopClicked() {
-        context.startService(ScreenCaptureService.stopIntent(context))
+        activity.startService(ScreenCaptureService.stopIntent(activity))
     }
 
-    val isRecording = status is CaptureState.Status.Recording ||
+    val isStreaming = status is CaptureState.Status.Recording ||
         status is CaptureState.Status.Starting
 
     Scaffold(
@@ -116,25 +121,44 @@ fun SenderScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.Center,
         ) {
             StatusCard(status)
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
 
-            if (isRecording) {
+            OutlinedTextField(
+                value = host,
+                onValueChange = { host = it },
+                label = { Text("Receiver IP address") },
+                placeholder = { Text("e.g. 192.168.1.42") },
+                singleLine = true,
+                enabled = !isStreaming,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Open \"View another device\" on the other phone to see its IP.",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+
+            if (isStreaming) {
                 Button(
                     onClick = { onStopClicked() },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
                     Icon(Icons.Filled.Stop, contentDescription = null)
-                    Text("  Stop capture")
+                    Text("  Stop streaming")
                 }
             } else {
                 Button(
                     onClick = { onStartClicked() },
+                    enabled = host.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp),
                 ) {
-                    Icon(Icons.Filled.FiberManualRecord, contentDescription = null)
-                    Text("  Start capture")
+                    Icon(Icons.Filled.Cast, contentDescription = null)
+                    Text("  Start streaming")
                 }
             }
         }
@@ -152,13 +176,13 @@ private fun StatusCard(status: CaptureState.Status) {
         ) {
             val (title, detail) = when (status) {
                 is CaptureState.Status.Idle ->
-                    "Ready" to "Tap Start capture. Android will ask for permission to record your screen."
+                    "Ready" to "Enter the Receiver's IP, then Start streaming. Android will ask permission to record your screen."
                 is CaptureState.Status.Starting ->
-                    "Starting…" to "Acquiring screen projection."
+                    "Connecting…" to "Connecting to the receiver and starting capture."
                 is CaptureState.Status.Recording ->
-                    "Recording" to "Capturing to:\n${status.outputPath}"
+                    "Streaming" to status.outputPath
                 is CaptureState.Status.Finished ->
-                    "Saved ✓" to "Proof-of-capture MP4 written to:\n${status.outputPath}"
+                    "Stopped" to "Streaming ended."
                 is CaptureState.Status.Error ->
                     "Error" to status.message
             }
@@ -173,14 +197,10 @@ private fun StatusCard(status: CaptureState.Status) {
     }
 }
 
-/**
- * Resolves the current [Activity] from the composition's context. The projection
- * launcher and service starts need an Activity context.
- */
+/** Resolves the hosting [Activity] from the composition context. */
 @Composable
-private fun LocalContextActivity(): Activity {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var ctx = context
+private fun rememberSenderActivity(): Activity {
+    var ctx: Context = androidx.compose.ui.platform.LocalContext.current
     while (ctx is android.content.ContextWrapper) {
         if (ctx is Activity) return ctx
         ctx = ctx.baseContext
