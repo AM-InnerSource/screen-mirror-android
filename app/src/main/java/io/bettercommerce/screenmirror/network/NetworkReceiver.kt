@@ -72,26 +72,41 @@ class NetworkReceiver(
         try {
             val server = ServerSocket(port)
             serverSocket = server
-            onStatus(Status.LISTENING)
             Log.i(TAG, "Listening on port $port")
 
-            val client = server.accept()
-            client.tcpNoDelay = true
-            onStatus(Status.RECEIVING)
-            Log.i(TAG, "Sender connected: ${client.inetAddress?.hostAddress}")
+            // Keep serving: after one sender disconnects, wait for the next.
+            while (running) {
+                onStatus(Status.LISTENING)
+                val client = try {
+                    server.accept()
+                } catch (e: SocketException) {
+                    break // stop() closed the server socket
+                }
+                client.tcpNoDelay = true
+                onStatus(Status.RECEIVING)
+                Log.i(TAG, "Sender connected: ${client.inetAddress?.hostAddress}")
 
-            DataInputStream(BufferedInputStream(client.getInputStream())).use { input ->
-                readStream(input)
+                try {
+                    DataInputStream(BufferedInputStream(client.getInputStream())).use { input ->
+                        readStream(input)
+                    }
+                } catch (e: EOFException) {
+                    Log.i(TAG, "Sender disconnected")
+                } catch (e: SocketException) {
+                    Log.i(TAG, "Sender connection reset")
+                } finally {
+                    // Reset decode state so the next sender starts cleanly.
+                    synchronized(lock) {
+                        decoder?.release()
+                        decoder = null
+                        pendingFormat = null
+                    }
+                    try {
+                        client.close()
+                    } catch (_: Throwable) {
+                    }
+                }
             }
-            client.close()
-        } catch (e: SocketException) {
-            // Expected when stop() closes the server socket.
-            if (running) {
-                Log.e(TAG, "socket error", e)
-                onStatus(Status.ERROR)
-            }
-        } catch (e: EOFException) {
-            Log.i(TAG, "Sender disconnected")
         } catch (t: Throwable) {
             Log.e(TAG, "server loop failed", t)
             if (running) onStatus(Status.ERROR)

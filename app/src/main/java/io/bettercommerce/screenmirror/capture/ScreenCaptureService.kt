@@ -19,6 +19,7 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import io.bettercommerce.screenmirror.MainActivity
 import io.bettercommerce.screenmirror.R
+import io.bettercommerce.screenmirror.monetization.Entitlements
 import io.bettercommerce.screenmirror.network.FrameProtocol
 import io.bettercommerce.screenmirror.network.NetworkSender
 import java.io.File
@@ -94,7 +95,9 @@ class ScreenCaptureService : Service() {
         mediaProjection = projection
         projection.registerCallback(projectionCallback, null)
 
-        val (width, height, dpi) = captureDimensions()
+        // Quality scales with the subscription tier (Pro gets higher res/fps/bitrate).
+        val config = CaptureConfig.forTier(Entitlements.isProNow)
+        val (width, height, dpi) = captureDimensions(config)
 
         // 3. The SENDER path connects a socket (blocking) before encoding, so it
         //    runs on a background thread. FILE / LOOPBACK start synchronously.
@@ -102,9 +105,9 @@ class ScreenCaptureService : Service() {
             Thread {
                 try {
                     val sender = NetworkSender(host, port).also { it.connect() }
-                    encoder = ScreenEncoder(projection, width, height, dpi, sender).also { it.start() }
+                    encoder = ScreenEncoder(projection, width, height, dpi, config, sender).also { it.start() }
                     CaptureState.update(CaptureState.Status.Recording("Streaming to $host:$port"))
-                    Log.i(TAG, "Streaming -> $host:$port (${width}x$height)")
+                    Log.i(TAG, "Streaming -> $host:$port (${width}x$height @ ${config.frameRate}fps)")
                 } catch (t: Throwable) {
                     Log.e(TAG, "Failed to start network sender", t)
                     CaptureState.update(CaptureState.Status.Error(t.message ?: "connect failed"))
@@ -126,9 +129,9 @@ class ScreenCaptureService : Service() {
         }
 
         try {
-            encoder = ScreenEncoder(projection, width, height, dpi, listener).also { it.start() }
+            encoder = ScreenEncoder(projection, width, height, dpi, config, listener).also { it.start() }
             CaptureState.update(CaptureState.Status.Recording(recordingLabel))
-            Log.i(TAG, "Capture started -> $recordingLabel (${width}x$height)")
+            Log.i(TAG, "Capture started -> $recordingLabel (${width}x$height @ ${config.frameRate}fps)")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start encoder", t)
             CaptureState.update(CaptureState.Status.Error(t.message ?: "encoder start failed"))
@@ -216,7 +219,7 @@ class ScreenCaptureService : Service() {
 
     private data class Dimensions(val width: Int, val height: Int, val dpi: Int)
 
-    private fun captureDimensions(): Dimensions {
+    private fun captureDimensions(config: CaptureConfig): Dimensions {
         val metrics = DisplayMetrics()
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         @Suppress("DEPRECATION")
@@ -225,10 +228,10 @@ class ScreenCaptureService : Service() {
         var width = metrics.widthPixels
         var height = metrics.heightPixels
 
-        // Cap the longer edge to 720p for M1 to keep any encoder happy.
+        // Cap the longer edge per the quality tier (720p free / 1080p pro).
         val longEdge = maxOf(width, height)
-        if (longEdge > MAX_LONG_EDGE) {
-            val scale = MAX_LONG_EDGE.toFloat() / longEdge
+        if (longEdge > config.maxLongEdge) {
+            val scale = config.maxLongEdge.toFloat() / longEdge
             width = (width * scale).roundToInt()
             height = (height * scale).roundToInt()
         }
@@ -257,7 +260,6 @@ class ScreenCaptureService : Service() {
         private const val TAG = "ScreenCaptureService"
         private const val CHANNEL_ID = "screen_capture"
         private const val NOTIFICATION_ID = 1001
-        private const val MAX_LONG_EDGE = 1280
 
         const val ACTION_START = "io.bettercommerce.screenmirror.action.START"
         const val ACTION_STOP = "io.bettercommerce.screenmirror.action.STOP"

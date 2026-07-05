@@ -2,6 +2,7 @@ package io.bettercommerce.screenmirror.capture
 
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
@@ -17,6 +18,11 @@ class VideoDecoder(surface: Surface, format: MediaFormat) {
 
     private val codec: MediaCodec =
         MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+            // Request low-latency decoding where supported (API 30+) to minimise
+            // the delay between receiving a frame and showing it.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            }
             configure(format, surface, null, 0)
             start()
         }
