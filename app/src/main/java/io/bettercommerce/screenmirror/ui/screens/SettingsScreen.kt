@@ -2,6 +2,8 @@ package io.bettercommerce.screenmirror.ui.screens
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -127,9 +130,26 @@ fun SettingsScreen(onBack: () -> Unit) {
                 "Toggle to preview the ad-free Pro experience without buying.",
                 style = MaterialTheme.typography.labelSmall,
             )
+
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+
+            TextButton(
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL))
+                    runCatching { activity.startActivity(intent) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Privacy Policy")
+            }
         }
     }
 }
+
+/** Replace with the public URL where PRIVACY_POLICY.md is hosted before release. */
+private const val PRIVACY_POLICY_URL = "https://bettercommerce.io/screenmirror/privacy"
 
 @Composable
 private fun Row(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
