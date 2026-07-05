@@ -71,6 +71,8 @@ class ScreenCaptureService : Service() {
             return
         }
 
+        val loopback = intent.getBooleanExtra(EXTRA_LOOPBACK, false)
+
         CaptureState.update(CaptureState.Status.Starting)
 
         // 1. Enter the foreground FIRST (required before acquiring projection on API 34+).
@@ -87,13 +89,25 @@ class ScreenCaptureService : Service() {
         mediaProjection = projection
         projection.registerCallback(projectionCallback, null)
 
-        // 3. Work out capture dimensions (capped to 720p for M1) and start encoding.
+        // 3. Pick the destination for the encoded frames:
+        //    - loopback (M2): decode + render locally via LoopbackController
+        //    - file     (M1): write an .mp4 via MuxerFrameListener
         val (width, height, dpi) = captureDimensions()
-        val outputFile = newOutputFile()
+        val listener: EncodedFrameListener
+        val recordingLabel: String
+        if (loopback) {
+            listener = LoopbackController
+            recordingLabel = LOOPBACK_LABEL
+        } else {
+            val file = newOutputFile()
+            listener = MuxerFrameListener(file)
+            recordingLabel = file.absolutePath
+        }
+
         try {
-            encoder = ScreenEncoder(projection, width, height, dpi, outputFile).also { it.start() }
-            CaptureState.update(CaptureState.Status.Recording(outputFile.absolutePath))
-            Log.i(TAG, "Capture started -> ${outputFile.absolutePath} (${width}x$height)")
+            encoder = ScreenEncoder(projection, width, height, dpi, listener).also { it.start() }
+            CaptureState.update(CaptureState.Status.Recording(recordingLabel))
+            Log.i(TAG, "Capture started -> $recordingLabel (${width}x$height)")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to start encoder", t)
             CaptureState.update(CaptureState.Status.Error(t.message ?: "encoder start failed"))
@@ -228,13 +242,30 @@ class ScreenCaptureService : Service() {
         const val ACTION_STOP = "io.bettercommerce.screenmirror.action.STOP"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
+        const val EXTRA_LOOPBACK = "extra_loopback"
 
-        /** Builds the intent that starts capture with the projection grant. */
+        /** Sentinel label used in [CaptureState] when running the M2 loopback. */
+        const val LOOPBACK_LABEL = "loopback"
+
+        /** Starts capture that writes an .mp4 file (M1). */
         fun startIntent(context: Context, resultCode: Int, data: Intent): Intent =
+            buildStartIntent(context, resultCode, data, loopback = false)
+
+        /** Starts capture that decodes + renders locally (M2 loopback). */
+        fun startLoopbackIntent(context: Context, resultCode: Int, data: Intent): Intent =
+            buildStartIntent(context, resultCode, data, loopback = true)
+
+        private fun buildStartIntent(
+            context: Context,
+            resultCode: Int,
+            data: Intent,
+            loopback: Boolean,
+        ): Intent =
             Intent(context, ScreenCaptureService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_RESULT_DATA, data)
+                putExtra(EXTRA_LOOPBACK, loopback)
             }
 
         fun stopIntent(context: Context): Intent =

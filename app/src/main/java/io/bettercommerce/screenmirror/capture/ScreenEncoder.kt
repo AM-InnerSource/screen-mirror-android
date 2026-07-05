@@ -5,17 +5,15 @@ import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.MediaMuxer
 import android.media.projection.MediaProjection
 import android.util.Log
 import android.view.Surface
-import java.io.File
 
 /**
- * Captures a [MediaProjection] into a hardware H.264 encoder and muxes the
- * result into an MP4 file — the M1 "capture proof".
+ * Captures a [MediaProjection] into a hardware H.264 encoder and forwards the
+ * encoded frames to an [EncodedFrameListener].
  *
- * Pipeline:  VirtualDisplay -> Surface -> MediaCodec (H.264) -> MediaMuxer -> .mp4
+ * Pipeline:  VirtualDisplay -> Surface -> MediaCodec (H.264) -> listener
  *
  * The encoder is driven from its own thread which drains output buffers until an
  * end-of-stream marker arrives after [stop] signals the input.
@@ -25,16 +23,12 @@ class ScreenEncoder(
     private val width: Int,
     private val height: Int,
     private val densityDpi: Int,
-    private val outputFile: File,
+    private val listener: EncodedFrameListener,
 ) {
     private var codec: MediaCodec? = null
-    private var muxer: MediaMuxer? = null
     private var inputSurface: Surface? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var drainThread: Thread? = null
-
-    private var trackIndex = -1
-    private var muxerStarted = false
 
     /** Set once the caller asks to stop, so the drain loop can finish cleanly. */
     @Volatile private var stopping = false
@@ -55,8 +49,6 @@ class ScreenEncoder(
             inputSurface = createInputSurface()
             start()
         }
-
-        muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
         virtualDisplay = mediaProjection.createVirtualDisplay(
             "ScreenMirror",
@@ -84,7 +76,6 @@ class ScreenEncoder(
         } catch (t: Throwable) {
             Log.w(TAG, "signalEndOfInputStream failed", t)
         }
-        // Give the drain loop a moment to write the trailing frames + moov atom.
         drainThread?.join(DRAIN_JOIN_TIMEOUT_MS)
         release()
     }
@@ -97,31 +88,25 @@ class ScreenEncoder(
                 val index = codec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US)
                 when {
                     index == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                        // No output yet. If we're not stopping, keep waiting.
-                        if (stopping) {
-                            // Encoder may still emit EOS shortly after the signal;
-                            // continue looping until we actually see it.
-                        }
+                        // No output ready yet; keep polling (even while stopping,
+                        // until the EOS buffer actually arrives).
                     }
 
                     index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        // Format is known only now — this is when we may add the track.
-                        val muxer = this.muxer ?: break
-                        trackIndex = muxer.addTrack(codec.outputFormat)
-                        muxer.start()
-                        muxerStarted = true
+                        // Real output format (with SPS/PPS) is known only now.
+                        listener.onFormat(codec.outputFormat)
                     }
 
                     index >= 0 -> {
                         val encoded = codec.getOutputBuffer(index)
-                        // Codec config data (SPS/PPS) is carried in the format; skip it here.
+                        // Codec config (SPS/PPS) is delivered via the format above; skip here.
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                             bufferInfo.size = 0
                         }
-                        if (bufferInfo.size > 0 && muxerStarted && encoded != null) {
+                        if (bufferInfo.size > 0 && encoded != null) {
                             encoded.position(bufferInfo.offset)
                             encoded.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer?.writeSampleData(trackIndex, encoded, bufferInfo)
+                            listener.onFrame(encoded, bufferInfo)
                         }
                         codec.releaseOutputBuffer(index, false)
 
@@ -134,6 +119,12 @@ class ScreenEncoder(
         } catch (t: Throwable) {
             Log.e(TAG, "Encoder drain loop failed", t)
             CaptureState.update(CaptureState.Status.Error(t.message ?: "encode error"))
+        } finally {
+            try {
+                listener.onEnded()
+            } catch (t: Throwable) {
+                Log.w(TAG, "listener.onEnded failed", t)
+            }
         }
     }
 
@@ -149,16 +140,9 @@ class ScreenEncoder(
         } catch (t: Throwable) {
             Log.w(TAG, "codec release failed", t)
         }
-        try {
-            if (muxerStarted) muxer?.stop()
-            muxer?.release()
-        } catch (t: Throwable) {
-            Log.w(TAG, "muxer release failed", t)
-        }
         inputSurface?.release()
         virtualDisplay = null
         codec = null
-        muxer = null
         inputSurface = null
     }
 
