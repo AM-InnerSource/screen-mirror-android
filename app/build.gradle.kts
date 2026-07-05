@@ -66,5 +66,9 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
 
+    // Monetization
+    implementation(libs.play.services.ads)
+    implementation(libs.billing.ktx)
+
     debugImplementation(libs.androidx.ui.tooling)
 }

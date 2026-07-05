@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import io.bettercommerce.screenmirror.monetization.BannerAd
 import io.bettercommerce.screenmirror.ui.theme.ScreenMirrorTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,7 +43,13 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -92,6 +99,10 @@ fun HomeScreen(
                 Icon(Icons.Filled.Settings, contentDescription = null)
                 Text("  Settings")
             }
+        }
+
+            // Banner ad pinned to the bottom (hidden automatically for Pro users).
+            BannerAd()
         }
     }
 }
