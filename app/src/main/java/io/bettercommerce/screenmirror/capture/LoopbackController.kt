@@ -4,6 +4,9 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 
 /**
@@ -22,6 +25,10 @@ object LoopbackController : EncodedFrameListener {
     private var pendingFormat: MediaFormat? = null
     private var decoder: VideoDecoder? = null
 
+    private val _videoSize = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** Decoded video dimensions (width to height), for aspect-correct rendering. */
+    val videoSize: StateFlow<Pair<Int, Int>?> = _videoSize.asStateFlow()
+
     /** UI calls this when its SurfaceView surface is created. */
     fun attachSurface(newSurface: Surface) = synchronized(lock) {
         surface = newSurface
@@ -37,6 +44,8 @@ object LoopbackController : EncodedFrameListener {
 
     override fun onFormat(format: MediaFormat) = synchronized(lock) {
         pendingFormat = format
+        _videoSize.value = format.getInteger(MediaFormat.KEY_WIDTH) to
+            format.getInteger(MediaFormat.KEY_HEIGHT)
         maybeCreateDecoder()
     }
 
@@ -60,6 +69,7 @@ object LoopbackController : EncodedFrameListener {
         decoder?.release()
         decoder = null
         pendingFormat = null
+        _videoSize.value = null
     }
 
     private fun maybeCreateDecoder() {
